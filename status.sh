@@ -26,8 +26,7 @@ USED_TOKENS=0
 MAX_TOKENS=200000
 
 if [[ -n "$SESSION_ID" ]]; then
-  SANITIZED=$(pwd | sed 's|/|-|g')
-  JSONL="$HOME/.claude/projects/${SANITIZED}/${SESSION_ID}.jsonl"
+  JSONL=$(find "$HOME/.claude/projects" -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
 
   if [[ -f "$JSONL" ]]; then
     # Read last assistant entry — extract model and usage fields
