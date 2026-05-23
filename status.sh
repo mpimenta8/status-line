@@ -60,6 +60,44 @@ PCT=$(( USED_TOKENS * 100 / MAX_TOKENS ))
 FILLED=$(( PCT * 20 / 100 ))
 EMPTY=$(( 20 - FILLED ))
 
+# ── Hourly output usage ───────────────────────────────────────────────────────
+MAX_HOURLY_TOKENS=40000
+HOURLY_OUTPUT=$(python3 -c "
+import json, os, glob, datetime
+cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+total = 0
+for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
+    try:
+        with open(f) as fh:
+            for line in fh:
+                try:
+                    d = json.loads(line)
+                    if d.get('type') != 'assistant':
+                        continue
+                    ts = d.get('timestamp', '')
+                    if not ts:
+                        continue
+                    t = datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    if t < cutoff:
+                        continue
+                    u = d.get('message', {}).get('usage', {})
+                    total += u.get('output_tokens', 0)
+                except:
+                    pass
+    except:
+        pass
+print(total)
+" 2>/dev/null)
+HOURLY_OUTPUT="${HOURLY_OUTPUT:-0}"
+HOURLY_PCT=$(( HOURLY_OUTPUT * 100 / MAX_HOURLY_TOKENS ))
+[[ $HOURLY_PCT -gt 100 ]] && HOURLY_PCT=100
+
+if   [[ $HOURLY_PCT -lt 40 ]]; then HOURLY_COLOR="$CYN"
+elif [[ $HOURLY_PCT -lt 70 ]]; then HOURLY_COLOR="$MID"
+else                                HOURLY_COLOR="$HOT"
+fi
+HOURLY_SEGMENT="  ${DIV}│${RST}  ${HOURLY_COLOR}${HOURLY_PCT}%${RST}"
+
 BAR="["
 for (( i=0; i<FILLED; i++ )); do
   BLOCK_PCT=$(( i * 100 / 20 ))
@@ -106,9 +144,10 @@ fi
 EFFORT_LABEL="${EFFORT:-?}"
 
 # ── Assemble and print ────────────────────────────────────────────────────────
-printf "  ${CYN}%s${RST}  ${PUR}◆ %s${RST}  ${DIV}│${RST}  %s ${PCT}%%%s%s\n" \
+printf "  ${CYN}%s${RST}  ${PUR}◆ %s${RST}  ${DIV}│${RST}  %s ${PCT}%%%s%s%s\n" \
   "$MODEL" \
   "$EFFORT_LABEL" \
   "$BAR" \
   "$ALERT" \
+  "$HOURLY_SEGMENT" \
   "$GIT_SEGMENT"
