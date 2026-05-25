@@ -50,6 +50,30 @@ print(total)
   fi
 fi
 
+# Fallback: if no assistant message yet (new session / after /clear),
+# grab the model from the most recent assistant entry across all sessions
+if [[ -z "$MODEL" ]]; then
+  MODEL=$(python3 -c "
+import json, os, glob
+files = sorted(
+    glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True),
+    key=os.path.getmtime, reverse=True
+)
+for f in files[:10]:
+    try:
+        with open(f) as fh:
+            lines = [l for l in fh if '\"type\":\"assistant\"' in l]
+            if lines:
+                d = json.loads(lines[-1])
+                m = d.get('message', {}).get('model', '')
+                if m:
+                    print(m)
+                    break
+    except:
+        pass
+" 2>/dev/null)
+fi
+
 MODEL="${MODEL:-unknown}"
 USED_TOKENS="${USED_TOKENS:-0}"
 
