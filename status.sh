@@ -83,11 +83,34 @@ PCT=$(( USED_TOKENS * 100 / MAX_TOKENS ))
 FILLED=$(( PCT * 20 / 100 ))
 EMPTY=$(( 20 - FILLED ))
 
-# ── 5-hour output usage (approximates Claude app session usage) ───────────────
-MAX_HOURLY_TOKENS=75000
-HOURLY_OUTPUT=$(python3 -c "
+# ── Session token display ─────────────────────────────────────────────────────
+# Median session size across historical sessions — update periodically by running:
+# python3 -c "import json,os,glob; t=sorted([sum(u.get('input_tokens',0)+u.get('output_tokens',0)+u.get('cache_creation_input_tokens',0)+u.get('cache_read_input_tokens',0) for l in open(f) if (u:=(__import__('json').loads(l) if '{' in l else {}).get('message',{}).get('usage',{}))) for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'),recursive=True)]); print(t[len(t)//2])"
+MEDIAN_SESSION=776512
+
+SESSION_FMT=$(python3 -c "
+t = $USED_TOKENS
+if t >= 1000000:
+    print(f'{t/1000000:.1f}M')
+elif t >= 1000:
+    print(f'{t/1000:.1f}K')
+else:
+    print(str(t))
+" 2>/dev/null)
+SESSION_FMT="${SESSION_FMT:-0}"
+
+SESSION_PCT=$(( USED_TOKENS * 100 / MEDIAN_SESSION ))
+if   (( SESSION_PCT < 50  )); then SESSION_COLOR=$(c 76 201 240)   # cyan    — light
+elif (( SESSION_PCT < 100 )); then SESSION_COLOR=$(c 183 168 237)  # lavender — normal
+elif (( SESSION_PCT < 200 )); then SESSION_COLOR=$(c 255 45 120)   # hot pink — heavy
+else                               SESSION_COLOR=$(c 255 230 0)    # gold     — deep work
+fi
+
+# ── Monthly token display ─────────────────────────────────────────────────────
+MONTHLY_FMT=$(python3 -c "
 import json, os, glob, datetime
-cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=5)
+now = datetime.datetime.now(datetime.timezone.utc)
+month_start = datetime.datetime(now.year, now.month, 1, tzinfo=datetime.timezone.utc)
 total = 0
 for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
     try:
@@ -101,34 +124,27 @@ for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursiv
                     if not ts:
                         continue
                     t = datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                    if t < cutoff:
+                    if t < month_start:
                         continue
                     u = d.get('message', {}).get('usage', {})
-                    total += u.get('output_tokens', 0)
+                    total += (u.get('input_tokens', 0)
+                            + u.get('output_tokens', 0)
+                            + u.get('cache_creation_input_tokens', 0)
+                            + u.get('cache_read_input_tokens', 0))
                 except:
                     pass
     except:
         pass
-print(total)
+if total >= 1000000:
+    print(f'{total/1000000:.1f}M')
+elif total >= 1000:
+    print(f'{total/1000:.1f}K')
+else:
+    print(str(total))
 " 2>/dev/null)
-HOURLY_OUTPUT="${HOURLY_OUTPUT:-0}"
-HOURLY_PCT=$(( HOURLY_OUTPUT * 100 / MAX_HOURLY_TOKENS ))
-[[ $HOURLY_PCT -gt 100 ]] && HOURLY_PCT=100
+MONTHLY_FMT="${MONTHLY_FMT:-0}"
 
-HT=$(( HOURLY_PCT * 10 ))
-if (( HT <= 500 )); then
-  HF=$HT
-  HR=$(( 76  + (157 -  76) * HF / 500 ))
-  HG=$(( 201 + ( 78 - 201) * HF / 500 ))
-  HB=$(( 240 + (221 - 240) * HF / 500 ))
-else
-  HF=$(( HT - 500 ))
-  HR=$(( 157 + (255 - 157) * HF / 500 ))
-  HG=$(( 78  + ( 45 -  78) * HF / 500 ))
-  HB=$(( 221 + (120 - 221) * HF / 500 ))
-fi
-HOURLY_COLOR=$(printf '\e[38;2;%d;%d;%dm' $HR $HG $HB)
-HOURLY_SEGMENT="  │  Current: ${HOURLY_COLOR}${HOURLY_PCT}%${RST} "
+TOKEN_SEGMENT="  │  S: ${SESSION_COLOR}${SESSION_FMT}${RST}  M: ${LAV}${MONTHLY_FMT}${RST} "
 
 BAR="["
 for (( i=0; i<FILLED; i++ )); do
@@ -230,5 +246,5 @@ printf "  %s  %s  │  %s ${PCT}%% of context%s%s%s\n" \
   "$EFFORT_DISPLAY" \
   "$BAR" \
   "$ALERT" \
-  "$HOURLY_SEGMENT" \
+  "$TOKEN_SEGMENT" \
   "$GIT_SEGMENT"
