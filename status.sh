@@ -33,13 +33,13 @@ if [[ -n "$SESSION_ID" ]]; then
     if [[ -n "$LAST" ]]; then
       MODEL=$(echo "$LAST" | python3 -c "
 import sys, json
-d = json.loads(sys.stdin.read())
+d = json.loads(sys.stdin.read(), strict=False)
 print(d.get('message', {}).get('model', ''))
 " 2>/dev/null)
 
       USED_TOKENS=$(echo "$LAST" | python3 -c "
 import sys, json
-d = json.loads(sys.stdin.read())
+d = json.loads(sys.stdin.read(), strict=False)
 u = d.get('message', {}).get('usage', {})
 total = (u.get('input_tokens', 0)
        + u.get('cache_creation_input_tokens', 0)
@@ -64,7 +64,7 @@ for f in files[:10]:
         with open(f) as fh:
             lines = [l for l in fh if '\"type\":\"assistant\"' in l]
             if lines:
-                d = json.loads(lines[-1])
+                d = json.loads(lines[-1], strict=False)
                 m = d.get('message', {}).get('model', '')
                 if m:
                     print(m)
@@ -117,7 +117,7 @@ for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursiv
         with open(f) as fh:
             for line in fh:
                 try:
-                    d = json.loads(line)
+                    d = json.loads(line, strict=False)
                     if d.get('type') != 'assistant':
                         continue
                     ts = d.get('timestamp', '')
