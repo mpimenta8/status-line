@@ -112,8 +112,11 @@ import json, os, glob, datetime
 now = datetime.datetime.now(datetime.timezone.utc)
 month_start = datetime.datetime(now.year, now.month, 1, tzinfo=datetime.timezone.utc)
 total = 0
+month_start_ts = month_start.timestamp()
 for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
     try:
+        if os.path.getmtime(f) < month_start_ts:
+            continue
         with open(f) as fh:
             for line in fh:
                 try:
