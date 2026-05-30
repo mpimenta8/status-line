@@ -19,136 +19,135 @@ SCY=$(c 103 232 249)  # #67E8F9 soft cyan        — ⬆ ahead
 PNK=$(c 255 110 199)  # #FF6EC7 pink             — ± modified
 RST=$(rst)
 
-# ── Token / model data ───────────────────────────────────────────────────────
-MODEL=""
-USED_TOKENS=0
-MAX_TOKENS=200000
+# ── Single python3 call: model, tokens, monthly (cached 60s) ─────────────────
+# Median session tokens — update periodically (see MEMORY.md for command)
+MEDIAN_SESSION=776512
 
-if [[ -n "$SESSION_ID" ]]; then
-  JSONL=$(find "$HOME/.claude/projects" -name "${SESSION_ID}.jsonl" 2>/dev/null | head -1)
+eval "$(SESSION_ID="$SESSION_ID" python3 -c '
+import json, os, glob, datetime, time
 
-  if [[ -f "$JSONL" ]]; then
-    # Read last assistant entry — extract model and usage fields
-    LAST=$(grep '"type":"assistant"' "$JSONL" 2>/dev/null | tail -1)
-    if [[ -n "$LAST" ]]; then
-      MODEL=$(echo "$LAST" | python3 -c "
-import sys, json
-d = json.loads(sys.stdin.read(), strict=False)
-print(d.get('message', {}).get('model', ''))
-" 2>/dev/null)
+home = os.path.expanduser("~")
+session_id = os.environ.get("SESSION_ID", "")
+cache_path = "/tmp/claude_monthly_tokens"
+cache_ttl = 60
 
-      USED_TOKENS=$(echo "$LAST" | python3 -c "
-import sys, json
-d = json.loads(sys.stdin.read(), strict=False)
-u = d.get('message', {}).get('usage', {})
-total = (u.get('input_tokens', 0)
-       + u.get('cache_creation_input_tokens', 0)
-       + u.get('cache_read_input_tokens', 0))
-print(total)
-" 2>/dev/null)
-    fi
-  fi
-fi
+# ── Session: model + token count ──────────────────────────────────────────────
+model = ""
+used_tokens = 0
 
-# Fallback: if no assistant message yet (new session / after /clear),
-# grab the model from the most recent assistant entry across all sessions
-if [[ -z "$MODEL" ]]; then
-  MODEL=$(python3 -c "
-import json, os, glob
-files = sorted(
-    glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True),
-    key=os.path.getmtime, reverse=True
-)
-for f in files[:10]:
-    try:
-        with open(f) as fh:
-            lines = [l for l in fh if '\"type\":\"assistant\"' in l]
+if session_id:
+    matches = glob.glob(
+        os.path.join(home, ".claude/projects/**/" + session_id + ".jsonl"),
+        recursive=True
+    )
+    if matches:
+        try:
+            with open(matches[0]) as fh:
+                lines = [l for l in fh if "\"type\":\"assistant\"" in l]
             if lines:
                 d = json.loads(lines[-1], strict=False)
-                m = d.get('message', {}).get('model', '')
+                model = d.get("message", {}).get("model", "")
+                u = d.get("message", {}).get("usage", {})
+                used_tokens = (u.get("input_tokens", 0)
+                             + u.get("cache_creation_input_tokens", 0)
+                             + u.get("cache_read_input_tokens", 0))
+        except:
+            pass
+
+# ── Model fallback: most recent session with an assistant entry ───────────────
+if not model:
+    files = sorted(
+        glob.glob(os.path.join(home, ".claude/projects/**/*.jsonl"), recursive=True),
+        key=os.path.getmtime, reverse=True
+    )
+    for f in files[:10]:
+        try:
+            with open(f) as fh:
+                lines = [l for l in fh if "\"type\":\"assistant\"" in l]
+            if lines:
+                d = json.loads(lines[-1], strict=False)
+                m = d.get("message", {}).get("model", "")
                 if m:
-                    print(m)
+                    model = m
                     break
-    except:
-        pass
-" 2>/dev/null)
-fi
+        except:
+            pass
+
+# ── Format helper ─────────────────────────────────────────────────────────────
+def fmt(t):
+    if t >= 1000000: return f"{t/1000000:.1f}M"
+    if t >= 1000:    return f"{t/1000:.1f}K"
+    return str(t)
+
+# ── Monthly tokens (cached in /tmp, recalculated every 60s) ──────────────────
+monthly_raw = 0
+try:
+    if os.path.exists(cache_path) and (time.time() - os.path.getmtime(cache_path)) < cache_ttl:
+        with open(cache_path) as fh:
+            monthly_raw = int(fh.read().strip())
+    else:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        month_start = datetime.datetime(now.year, now.month, 1, tzinfo=datetime.timezone.utc)
+        month_ts = month_start.timestamp()
+        for f in glob.glob(os.path.join(home, ".claude/projects/**/*.jsonl"), recursive=True):
+            try:
+                if os.path.getmtime(f) < month_ts:
+                    continue
+                with open(f) as fh:
+                    for line in fh:
+                        try:
+                            d = json.loads(line, strict=False)
+                            if d.get("type") != "assistant":
+                                continue
+                            ts = d.get("timestamp", "")
+                            if not ts:
+                                continue
+                            t = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            if t < month_start:
+                                continue
+                            u = d.get("message", {}).get("usage", {})
+                            monthly_raw += (u.get("input_tokens", 0)
+                                         + u.get("output_tokens", 0)
+                                         + u.get("cache_creation_input_tokens", 0)
+                                         + u.get("cache_read_input_tokens", 0))
+                        except:
+                            pass
+            except:
+                pass
+        with open(cache_path, "w") as fh:
+            fh.write(str(monthly_raw))
+except:
+    pass
+
+print("MODEL=" + (model or "unknown"))
+print("USED_TOKENS=" + str(used_tokens))
+print("SESSION_FMT=" + fmt(used_tokens))
+print("MONTHLY_FMT=" + fmt(monthly_raw))
+' 2>/dev/null)"
 
 MODEL="${MODEL:-unknown}"
 USED_TOKENS="${USED_TOKENS:-0}"
+SESSION_FMT="${SESSION_FMT:-0}"
+MONTHLY_FMT="${MONTHLY_FMT:-0}"
 
 # ── Context bar ───────────────────────────────────────────────────────────────
+MAX_TOKENS=200000
 PCT=$(( USED_TOKENS * 100 / MAX_TOKENS ))
 [[ $PCT -gt 100 ]] && PCT=100
 FILLED=$(( PCT * 20 / 100 ))
 EMPTY=$(( 20 - FILLED ))
 
-# ── Session token display ─────────────────────────────────────────────────────
-# Median session size across historical sessions — update periodically by running:
-# python3 -c "import json,os,glob; t=sorted([sum(u.get('input_tokens',0)+u.get('output_tokens',0)+u.get('cache_creation_input_tokens',0)+u.get('cache_read_input_tokens',0) for l in open(f) if (u:=(__import__('json').loads(l) if '{' in l else {}).get('message',{}).get('usage',{}))) for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'),recursive=True)]); print(t[len(t)//2])"
-MEDIAN_SESSION=776512
-
-SESSION_FMT=$(python3 -c "
-t = $USED_TOKENS
-if t >= 1000000:
-    print(f'{t/1000000:.1f}M')
-elif t >= 1000:
-    print(f'{t/1000:.1f}K')
-else:
-    print(str(t))
-" 2>/dev/null)
-SESSION_FMT="${SESSION_FMT:-0}"
-
+# ── Session token color (vs median) ──────────────────────────────────────────
 SESSION_PCT=$(( USED_TOKENS * 100 / MEDIAN_SESSION ))
-if   (( SESSION_PCT < 50  )); then SESSION_COLOR=$(c 76 201 240)   # cyan    — light
+if   (( SESSION_PCT < 50  )); then SESSION_COLOR=$(c 76 201 240)   # cyan     — light
 elif (( SESSION_PCT < 100 )); then SESSION_COLOR=$(c 183 168 237)  # lavender — normal
 elif (( SESSION_PCT < 200 )); then SESSION_COLOR=$(c 255 45 120)   # hot pink — heavy
 else                               SESSION_COLOR=$(c 255 230 0)    # gold     — deep work
 fi
 
-# ── Monthly token display ─────────────────────────────────────────────────────
-MONTHLY_FMT=$(python3 -c "
-import json, os, glob, datetime
-now = datetime.datetime.now(datetime.timezone.utc)
-month_start = datetime.datetime(now.year, now.month, 1, tzinfo=datetime.timezone.utc)
-total = 0
-month_start_ts = month_start.timestamp()
-for f in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
-    try:
-        if os.path.getmtime(f) < month_start_ts:
-            continue
-        with open(f) as fh:
-            for line in fh:
-                try:
-                    d = json.loads(line, strict=False)
-                    if d.get('type') != 'assistant':
-                        continue
-                    ts = d.get('timestamp', '')
-                    if not ts:
-                        continue
-                    t = datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))
-                    if t < month_start:
-                        continue
-                    u = d.get('message', {}).get('usage', {})
-                    total += (u.get('input_tokens', 0)
-                            + u.get('output_tokens', 0)
-                            + u.get('cache_creation_input_tokens', 0)
-                            + u.get('cache_read_input_tokens', 0))
-                except:
-                    pass
-    except:
-        pass
-if total >= 1000000:
-    print(f'{total/1000000:.1f}M')
-elif total >= 1000:
-    print(f'{total/1000:.1f}K')
-else:
-    print(str(total))
-" 2>/dev/null)
-MONTHLY_FMT="${MONTHLY_FMT:-0}"
-
 TOKEN_SEGMENT="  │  S: ${SESSION_COLOR}${SESSION_FMT}${RST}  M: ${LAV}${MONTHLY_FMT}${RST} "
 
+# ── Context bar gradient ──────────────────────────────────────────────────────
 BAR="["
 for (( i=0; i<FILLED; i++ )); do
   T=$(( i * 1000 / 20 ))
@@ -179,12 +178,10 @@ if git rev-parse --git-dir &>/dev/null; then
   REPO_NAME=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename)
   BRANCH=$(git branch --show-current 2>/dev/null)
 
-  # Deterministic icon from repo name
   ICONS=(◈ ⬡ ✦ ◉ ⊕ ★ ◎ ✧ ⬢ ⊙ ◇ ✴ ♠ ♥ ♦ ♣)
   IDX=$(echo "$REPO_NAME" | cksum | awk "{print \$1 % 16}")
   ICON="${ICONS[$IDX]}"
 
-  # Commits ahead of main / master
   AHEAD=0
   for BASE in main master; do
     if git rev-parse --verify "$BASE" &>/dev/null; then
@@ -193,7 +190,6 @@ if git rev-parse --git-dir &>/dev/null; then
     fi
   done
 
-  # Modified + untracked file count
   MODIFIED=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 
   GIT_SEGMENT=" │  ${LAV}${ICON} ${REPO_NAME}${RST}  ${BRANCH}  ${SCY}⬆ ${AHEAD}${RST}  ${PNK}± ${MODIFIED}${RST}"
