@@ -4,6 +4,11 @@
 SESSION_ID="${1:-}"
 EFFORT="${2:-}"
 
+# Claude Code pipes a fresh JSON payload on stdin every refresh; its model.id
+# reflects the *currently selected* model, so it updates the instant you /model
+# switch (the transcript only gets a new model after the next assistant turn).
+STDIN_JSON=$(cat)
+
 # ── Colors (truecolor) ──────────────────────────────────────────────────────
 c()  { printf '\e[38;2;%s;%s;%sm' "$1" "$2" "$3"; }
 rst(){ printf '\e[0m'; }
@@ -23,7 +28,7 @@ RST=$(rst)
 # Median session tokens — update periodically (see MEMORY.md for command)
 MEDIAN_SESSION=776512
 
-eval "$(SESSION_ID="$SESSION_ID" python3 -c '
+eval "$(SESSION_ID="$SESSION_ID" STDIN_JSON="$STDIN_JSON" python3 -c '
 import json, os, glob, re, datetime, time
 
 home = os.path.expanduser("~")
@@ -34,6 +39,23 @@ cache_ttl = 60
 # ── Session: model + token count ──────────────────────────────────────────────
 model = ""
 used_tokens = 0
+max_tokens = 0
+
+# Live stdin payload — updates instantly on /model switch and carries the
+# authoritative context-window figures Claude Code itself reports (the real
+# window size varies by model: e.g. 200K for older models, 1M for Opus 4.8).
+try:
+    payload = json.loads(os.environ.get("STDIN_JSON", ""))
+except:
+    payload = {}
+model = (payload.get("model") or {}).get("id", "") or ""
+cw = payload.get("context_window") or {}
+cu = cw.get("current_usage") or {}
+if cu:
+    used_tokens = (cu.get("input_tokens", 0)
+                 + cu.get("cache_creation_input_tokens", 0)
+                 + cu.get("cache_read_input_tokens", 0))
+max_tokens = cw.get("context_window_size", 0) or 0
 
 def tail_read_last_assistant(path, chunk=8192):
     try:
@@ -54,7 +76,9 @@ def tail_read_last_assistant(path, chunk=8192):
     except:
         return None
 
-if session_id:
+# Only fall back to the transcript when stdin did not supply what we need —
+# skipping the tail-read keeps the common path cheap.
+if session_id and (not model or not used_tokens):
     cwd = os.getcwd()
     proj_slug = re.sub(r"[/.]", "-", cwd)
     direct_path = os.path.join(home, ".claude/projects", proj_slug, session_id + ".jsonl")
@@ -70,11 +94,12 @@ if session_id:
         if line:
             try:
                 d = json.loads(line, strict=False)
-                model = d.get("message", {}).get("model", "")
-                u = d.get("message", {}).get("usage", {})
-                used_tokens = (u.get("input_tokens", 0)
-                             + u.get("cache_creation_input_tokens", 0)
-                             + u.get("cache_read_input_tokens", 0))
+                model = model or d.get("message", {}).get("model", "")
+                if not used_tokens:
+                    u = d.get("message", {}).get("usage", {})
+                    used_tokens = (u.get("input_tokens", 0)
+                                 + u.get("cache_creation_input_tokens", 0)
+                                 + u.get("cache_read_input_tokens", 0))
             except:
                 pass
 
@@ -145,17 +170,20 @@ except:
 
 print("MODEL=" + (model or "unknown"))
 print("USED_TOKENS=" + str(used_tokens))
+print("MAX_TOKENS=" + str(max_tokens or 200000))
 print("SESSION_FMT=" + fmt(used_tokens))
 print("MONTHLY_FMT=" + fmt(monthly_raw))
 ' 2>/dev/null)"
 
 MODEL="${MODEL:-unknown}"
 USED_TOKENS="${USED_TOKENS:-0}"
+MAX_TOKENS="${MAX_TOKENS:-200000}"
 SESSION_FMT="${SESSION_FMT:-0}"
 MONTHLY_FMT="${MONTHLY_FMT:-0}"
 
 # ── Context bar ───────────────────────────────────────────────────────────────
-MAX_TOKENS=200000
+# MAX_TOKENS comes from the stdin payload's real context_window_size (per-model),
+# falling back to 200000 if stdin is unavailable.
 PCT=$(( USED_TOKENS * 100 / MAX_TOKENS ))
 [[ $PCT -gt 100 ]] && PCT=100
 FILLED=$(( PCT * 20 / 100 ))
