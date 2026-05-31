@@ -2,12 +2,12 @@
 
 A synthwave-styled status bar for [Claude Code](https://claude.ai/code) that shows model, effort level, context usage, and git state at a glance.
 
-![Status line showing model, effort, context bar, and git info](effort-colors/effort_high.png)
+> Synthwave-styled status bar rendered at the bottom of Claude Code's terminal.
 
 ## What it shows
 
 ```
-  claude-sonnet-4-6  ◆ high  │  [████████████░░░░░░░░] 61% of context  │  Current: 34%  │  ✦ my-repo  main  ⬆ 2  ± 4
+  claude-sonnet-4-6  ◆ high  │  [████████████░░░░░░░░] 61% of context  │  S: 84.2K  M: 2.1M  │  ✦ my-repo  main  ⬆ 2  ± 4
 ```
 
 | Segment | Description |
@@ -15,7 +15,8 @@ A synthwave-styled status bar for [Claude Code](https://claude.ai/code) that sho
 | Model name | Active Claude model |
 | `◆ effort` | Current effort level (`low` / `medium` / `high` / `xhigh` / `max`) |
 | Context bar | Token usage vs. 200k context window, gradient cyan → purple → hot pink |
-| Current % | Output tokens in the last 5 hours as a % of the hourly rate limit |
+| `S:` | Session context tokens (input + cache), colored by usage vs. median |
+| `M:` | All tokens this calendar month, resets on the 1st |
 | Git | Repo icon (deterministic), branch, commits ahead of main, modified files |
 
 The context bar and effort display animate at higher levels — `xhigh` pulses, `max` cycles through rainbow colors.
@@ -45,8 +46,8 @@ chmod +x ~/status-line/status.sh
 ```json
 "statusLine": {
   "type": "command",
-  "command": "/path/to/status-line/status.sh ${CLAUDE_SESSION_ID} ${CLAUDE_EFFORT}",
-  "refreshInterval": 10
+  "command": "/path/to/status-line/status.sh ${CLAUDE_CODE_SESSION_ID} ${CLAUDE_EFFORT}",
+  "refreshInterval": 1
 }
 ```
 
@@ -59,10 +60,16 @@ Replace `/path/to/status-line` with wherever you cloned it (e.g. `~/status-line`
 | Element | Color |
 |---|---|
 | Model name | `#4CC9F0` sky cyan |
-| Effort `◆` | `#BF5FFF` neon purple |
-| Bar 0–50% | cyan → purple gradient |
-| Bar 50–100% | purple → `#FF2D78` hot pink |
+| `◆ low` | `#EAB308` amber |
+| `◆ medium` | `#22C55E` green |
+| `◆ high` | `#6366F1` indigo |
+| `◆ xhigh` | Pulsing purple animation |
+| `◆ max` | Rainbow cycle (red → amber → cyan → teal → blue → magenta) |
+| Bar 0–50% | `#4CC9F0` → `#9D4EDD` gradient |
+| Bar 50–100% | `#9D4EDD` → `#FF2D78` gradient |
 | Bar empty | `#0C0416` near-black |
+| `S:` session tokens | Cyan / lavender / hot pink / gold by usage level |
+| `M:` monthly tokens | `#B7A8ED` lavender |
 | Branch | `#FFE600` gold |
 | Commits ahead `⬆` | `#67E8F9` soft cyan |
 | Modified `±` | `#FF6EC7` pink |

@@ -24,7 +24,7 @@ RST=$(rst)
 MEDIAN_SESSION=776512
 
 eval "$(SESSION_ID="$SESSION_ID" python3 -c '
-import json, os, glob, datetime, time
+import json, os, glob, re, datetime, time
 
 home = os.path.expanduser("~")
 session_id = os.environ.get("SESSION_ID", "")
@@ -35,24 +35,48 @@ cache_ttl = 60
 model = ""
 used_tokens = 0
 
+def tail_read_last_assistant(path, chunk=8192):
+    try:
+        size = os.path.getsize(path)
+        buf = b""
+        with open(path, "rb") as fh:
+            pos = size
+            while pos > 0:
+                read_size = min(chunk, pos)
+                pos -= read_size
+                fh.seek(pos)
+                buf = fh.read(read_size) + buf
+                lines = buf.split(b"\n")
+                for line in reversed(lines):
+                    if b"\"type\":\"assistant\"" in line and line.strip():
+                        return line.decode("utf-8", errors="replace")
+        return None
+    except:
+        return None
+
 if session_id:
-    matches = glob.glob(
-        os.path.join(home, ".claude/projects/**/" + session_id + ".jsonl"),
-        recursive=True
-    )
-    if matches:
-        try:
-            with open(matches[0]) as fh:
-                lines = [l for l in fh if "\"type\":\"assistant\"" in l]
-            if lines:
-                d = json.loads(lines[-1], strict=False)
+    cwd = os.getcwd()
+    proj_slug = re.sub(r"[/.]", "-", cwd)
+    direct_path = os.path.join(home, ".claude/projects", proj_slug, session_id + ".jsonl")
+    if os.path.exists(direct_path):
+        candidate_paths = [direct_path]
+    else:
+        candidate_paths = glob.glob(
+            os.path.join(home, ".claude/projects/**/" + session_id + ".jsonl"),
+            recursive=True
+        )
+    if candidate_paths:
+        line = tail_read_last_assistant(candidate_paths[0])
+        if line:
+            try:
+                d = json.loads(line, strict=False)
                 model = d.get("message", {}).get("model", "")
                 u = d.get("message", {}).get("usage", {})
                 used_tokens = (u.get("input_tokens", 0)
                              + u.get("cache_creation_input_tokens", 0)
                              + u.get("cache_read_input_tokens", 0))
-        except:
-            pass
+            except:
+                pass
 
 # ── Model fallback: most recent session with an assistant entry ───────────────
 if not model:
