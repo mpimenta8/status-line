@@ -22,19 +22,37 @@ DRK=$(c 12 4 22)      # #0C0416 near-black purple — empty bar blocks
 GLD=$(c 255 230 0)    # #FFE600 gold             — branch
 SCY=$(c 103 232 249)  # #67E8F9 soft cyan        — ⬆ ahead
 PNK=$(c 255 110 199)  # #FF6EC7 pink             — ± modified
+MUT=$(c 128 128 148)  # #808094 muted gray       — reset countdowns, separators
 RST=$(rst)
 
-# ── Single python3 call: model, tokens, monthly (cached 60s) ─────────────────
-# Median session tokens — update periodically (see MEMORY.md for command)
-MEDIAN_SESSION=776512
+# ── Vaporwave gradient: T in 0..1000 → truecolor escape (cyan→purple→pink) ───
+# Shared by the context bar and the usage-window percentages so they read as one
+# palette. Callers choose the mapping: the bar keys T to block position; the
+# usage numbers key T to utilization with full pink reached by 90% (see below).
+grad() {
+  local T=$1 F R G B
+  (( T < 0 )) && T=0
+  (( T > 1000 )) && T=1000
+  if (( T <= 500 )); then
+    F=$T
+    R=$(( 76  + (157 -  76) * F / 500 ))
+    G=$(( 201 + ( 78 - 201) * F / 500 ))
+    B=$(( 240 + (221 - 240) * F / 500 ))
+  else
+    F=$(( T - 500 ))
+    R=$(( 157 + (255 - 157) * F / 500 ))
+    G=$(( 78  + ( 45 -  78) * F / 500 ))
+    B=$(( 221 + (120 - 221) * F / 500 ))
+  fi
+  printf '\e[38;2;%d;%d;%dm' $R $G $B
+}
 
+# ── Single python3 call: model, tokens, usage windows ────────────────────────
 eval "$(SESSION_ID="$SESSION_ID" STDIN_JSON="$STDIN_JSON" python3 -c '
 import json, os, glob, re, datetime, time
 
 home = os.path.expanduser("~")
 session_id = os.environ.get("SESSION_ID", "")
-cache_path = "/tmp/claude_monthly_tokens"
-cache_ttl = 60
 
 # ── Session: model + token count ──────────────────────────────────────────────
 model = ""
@@ -122,64 +140,59 @@ if not model:
         except:
             pass
 
-# ── Format helper ─────────────────────────────────────────────────────────────
-def fmt(t):
-    if t >= 1000000: return f"{t/1000000:.1f}M"
-    if t >= 1000:    return f"{t/1000:.1f}K"
-    return str(t)
+# ── Usage windows: session (5h) + weekly (7d) from Claude Code’s own cache ────
+# Claude Code refreshes ~/.claude.json → cachedUsageUtilization on its own; this
+# is the exact data behind the native "X% used <reset>" banner — far cheaper and
+# more accurate than scanning every transcript on disk.
+usage_ok = 0
+sess_pct = week_pct = 0
+sess_reset = week_reset = ""
 
-# ── Monthly tokens (cached in /tmp, recalculated every 60s) ──────────────────
-monthly_raw = 0
+def fmt_reset(iso):
+    try:
+        ra = datetime.datetime.fromisoformat(iso).timestamp()
+    except:
+        return ""
+    rem = int(ra - time.time())
+    if rem < 0:
+        rem = 0
+    d, r = divmod(rem, 86400)
+    h, r = divmod(r, 3600)
+    m = r // 60
+    if d: return f"{d}d {h}h"
+    if h: return f"{h}h {m}m"
+    return f"{m}m"
+
 try:
-    if os.path.exists(cache_path) and (time.time() - os.path.getmtime(cache_path)) < cache_ttl:
-        with open(cache_path) as fh:
-            monthly_raw = int(fh.read().strip())
-    else:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        month_start = datetime.datetime(now.year, now.month, 1, tzinfo=datetime.timezone.utc)
-        month_ts = month_start.timestamp()
-        for f in glob.glob(os.path.join(home, ".claude/projects/**/*.jsonl"), recursive=True):
-            try:
-                if os.path.getmtime(f) < month_ts:
-                    continue
-                with open(f) as fh:
-                    for line in fh:
-                        try:
-                            d = json.loads(line, strict=False)
-                            if d.get("type") != "assistant":
-                                continue
-                            ts = d.get("timestamp", "")
-                            if not ts:
-                                continue
-                            t = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                            if t < month_start:
-                                continue
-                            u = d.get("message", {}).get("usage", {})
-                            monthly_raw += (u.get("input_tokens", 0)
-                                         + u.get("output_tokens", 0)
-                                         + u.get("cache_creation_input_tokens", 0)
-                                         + u.get("cache_read_input_tokens", 0))
-                        except:
-                            pass
-            except:
-                pass
-        with open(cache_path, "w") as fh:
-            fh.write(str(monthly_raw))
+    with open(os.path.join(home, ".claude.json")) as fh:
+        util = (json.load(fh).get("cachedUsageUtilization") or {}).get("utilization") or {}
+    fh5 = util.get("five_hour") or {}
+    d7  = util.get("seven_day") or {}
+    if fh5 and d7:
+        sess_pct = int(fh5.get("utilization", 0))
+        week_pct = int(d7.get("utilization", 0))
+        sess_reset = fmt_reset(fh5.get("resets_at", ""))
+        week_reset = fmt_reset(d7.get("resets_at", ""))
+        usage_ok = 1
 except:
     pass
 
 print("MODEL=" + (model or "unknown"))
 print("USED_TOKENS=" + str(used_tokens))
 print("MAX_TOKENS=" + str(max_tokens or 200000))
-print("SESSION_FMT=" + fmt(used_tokens))
-print("MONTHLY_FMT=" + fmt(monthly_raw))
+print("USAGE_OK=" + str(usage_ok))
+print("SESS_PCT=" + str(sess_pct))
+print("WEEK_PCT=" + str(week_pct))
+print("SESS_RESET=\"" + sess_reset + "\"")
+print("WEEK_RESET=\"" + week_reset + "\"")
 ' 2>/dev/null)"
 
 MODEL="${MODEL:-unknown}"
 USED_TOKENS="${USED_TOKENS:-0}"
 MAX_TOKENS="${MAX_TOKENS:-200000}"
-SESSION_FMT="${SESSION_FMT:-0}"
-MONTHLY_FMT="${MONTHLY_FMT:-0}"
+USAGE_OK="${USAGE_OK:-0}"
+SESS_PCT="${SESS_PCT:-0}"
+WEEK_PCT="${WEEK_PCT:-0}"
 
 # ── Context bar ───────────────────────────────────────────────────────────────
 # MAX_TOKENS comes from the stdin payload's real context_window_size (per-model),
@@ -189,32 +202,22 @@ PCT=$(( USED_TOKENS * 100 / MAX_TOKENS ))
 FILLED=$(( PCT * 20 / 100 ))
 EMPTY=$(( 20 - FILLED ))
 
-# ── Session token color (vs median) ──────────────────────────────────────────
-SESSION_PCT=$(( USED_TOKENS * 100 / MEDIAN_SESSION ))
-if   (( SESSION_PCT < 50  )); then SESSION_COLOR=$(c 76 201 240)   # cyan     — light
-elif (( SESSION_PCT < 100 )); then SESSION_COLOR=$(c 183 168 237)  # lavender — normal
-elif (( SESSION_PCT < 200 )); then SESSION_COLOR=$(c 255 45 120)   # hot pink — heavy
-else                               SESSION_COLOR=$(c 255 230 0)    # gold     — deep work
+# ── Usage windows: session (5h) + weekly (7d), gradient-scaled ────────────────
+# The percent number + "used" carry the shared gradient; T = pct/90 so full pink
+# is reached by 90% utilization (and held through 100%) — you see pink before you
+# actually max out. Reset countdowns stay muted. Hidden entirely when the cache
+# is unavailable, collapsing its divider with it.
+USAGE_SEGMENT=""
+if [[ "$USAGE_OK" == "1" ]]; then
+  ST=$(( SESS_PCT * 1000 / 90 )); (( ST > 1000 )) && ST=1000
+  WT=$(( WEEK_PCT * 1000 / 90 )); (( WT > 1000 )) && WT=1000
+  USAGE_SEGMENT="  │  $(grad "$ST")${SESS_PCT}% used${RST} ${MUT}${SESS_RESET}${RST} ${MUT}·${RST} $(grad "$WT")${WEEK_PCT}% used${RST} ${MUT}${WEEK_RESET}${RST} "
 fi
 
-TOKEN_SEGMENT="  │  S: ${SESSION_COLOR}${SESSION_FMT}${RST}  M: ${LAV}${MONTHLY_FMT}${RST} "
-
-# ── Context bar gradient ──────────────────────────────────────────────────────
+# ── Context bar (uses the shared gradient, keyed to block position) ──────────
 BAR="["
 for (( i=0; i<FILLED; i++ )); do
-  T=$(( i * 1000 / 20 ))
-  if (( T <= 500 )); then
-    F=$T
-    R=$(( 76  + (157 -  76) * F / 500 ))
-    G=$(( 201 + ( 78 - 201) * F / 500 ))
-    B=$(( 240 + (221 - 240) * F / 500 ))
-  else
-    F=$(( T - 500 ))
-    R=$(( 157 + (255 - 157) * F / 500 ))
-    G=$(( 78  + ( 45 -  78) * F / 500 ))
-    B=$(( 221 + (120 - 221) * F / 500 ))
-  fi
-  BAR+="$(printf '\e[38;2;%d;%d;%dm█\e[0m' $R $G $B)"
+  BAR+="$(grad $(( i * 1000 / 20 )))█${RST}"
 done
 for (( i=0; i<EMPTY; i++ )); do
   BAR+="${DRK}░${RST}"
@@ -292,10 +295,10 @@ case "${EFFORT:-}" in
 esac
 
 # ── Assemble and print ────────────────────────────────────────────────────────
-printf "  %s  %s  │  %s ${PCT}%% of context%s%s%s\n" \
+printf "  %s  %s  │  %s ${PCT}%% context%s%s%s\n" \
   "$MODEL" \
   "$EFFORT_DISPLAY" \
   "$BAR" \
   "$ALERT" \
-  "$TOKEN_SEGMENT" \
+  "$USAGE_SEGMENT" \
   "$GIT_SEGMENT"

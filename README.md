@@ -7,17 +7,19 @@ A synthwave-styled status bar for [Claude Code](https://claude.ai/code) that sho
 ## What it shows
 
 ```
-  claude-sonnet-4-6  ◆ high  │  [████████████░░░░░░░░] 61% of context  │  S: 84.2K  M: 2.1M  │  ✦ my-repo  main  ⬆ 2  ± 4
+  claude-opus-4-8  ◆ high  │  [████████████░░░░░░░░] 61% context  │  16% used 1h 57m · 22% used 4d 10h  │  ✦ my-repo  main  ⬆ 2  ± 4
 ```
 
 | Segment | Description |
 |---|---|
 | Model name | Active Claude model |
 | `◆ effort` | Current effort level (`low` / `medium` / `high` / `xhigh` / `max`) |
-| Context bar | Token usage vs. 200k context window, gradient cyan → purple → hot pink |
-| `S:` | Session context tokens (input + cache), colored by usage vs. median |
-| `M:` | All tokens this calendar month, resets on the 1st |
+| Context bar | Token usage vs. the model's real context window (200K, or 1M on Opus 4.8), gradient cyan → purple → hot pink; label reads `61% context` |
+| `X% used <reset>` (session) | Your **5-hour** usage window: percent used and time until it resets. Pulled from Claude Code's own usage data (`~/.claude.json`), the same numbers behind its native banner. |
+| `X% used <reset>` (weekly) | Your **7-day** usage window: percent used and time until it resets. |
 | Git | Repo icon (deterministic), branch, commits ahead of main, modified files |
+
+The two `% used` numbers are colored on the same gradient as the context bar, scaled so they reach full pink by ~90% — you see the warning color before you actually hit the limit. Reset countdowns stay muted. If Claude Code hasn't populated its usage cache yet, the whole zone is hidden.
 
 The context bar and effort display animate at higher levels — `xhigh` pulses, `max` cycles through rainbow colors.
 
@@ -68,8 +70,8 @@ Replace `/path/to/status-line` with wherever you cloned it (e.g. `~/status-line`
 | Bar 0–50% | `#4CC9F0` → `#9D4EDD` gradient |
 | Bar 50–100% | `#9D4EDD` → `#FF2D78` gradient |
 | Bar empty | `#0C0416` near-black |
-| `S:` session tokens | Cyan / lavender / hot pink / gold by usage level |
-| `M:` monthly tokens | `#B7A8ED` lavender |
+| Session / weekly `% used` | Shared bar gradient, scaled so full pink hits by ~90% |
+| Reset countdowns | `#808094` muted gray |
 | Branch | `#FFE600` gold |
 | Commits ahead `⬆` | `#67E8F9` soft cyan |
 | Modified `±` | `#FF6EC7` pink |
