@@ -140,6 +140,19 @@ if not model:
         except:
             pass
 
+# ── Pretty model name: "claude-opus-4-8" → "Opus 4.8" ────────────────────────
+def pretty_model(model_id):
+    if not model_id:
+        return "unknown"
+    s = model_id[len("claude-"):] if model_id.startswith("claude-") else model_id
+    parts = [p for p in s.split("-") if p]
+    if not parts:
+        return model_id
+    family = parts[0][:1].upper() + parts[0][1:]
+    version_parts = [p for p in parts[1:] if not re.fullmatch(r"\d{8}", p)]
+    version = ".".join(version_parts)
+    return f"{family} {version}" if version else family
+
 # ── Usage windows: session (5h) + weekly (7d) from Claude Code’s own cache ────
 # Claude Code refreshes ~/.claude.json → cachedUsageUtilization on its own; this
 # is the exact data behind the native "X% used <reset>" banner — far cheaper and
@@ -177,7 +190,7 @@ try:
 except:
     pass
 
-print("MODEL=" + (model or "unknown"))
+print("MODEL=\"" + pretty_model(model) + "\"")
 print("USED_TOKENS=" + str(used_tokens))
 print("MAX_TOKENS=" + str(max_tokens or 200000))
 print("USAGE_OK=" + str(usage_ok))
@@ -211,7 +224,7 @@ USAGE_SEGMENT=""
 if [[ "$USAGE_OK" == "1" ]]; then
   ST=$(( SESS_PCT * 1000 / 90 )); (( ST > 1000 )) && ST=1000
   WT=$(( WEEK_PCT * 1000 / 90 )); (( WT > 1000 )) && WT=1000
-  USAGE_SEGMENT="  │  $(grad "$ST")${SESS_PCT}% used${RST} ${MUT}${SESS_RESET}${RST} ${MUT}·${RST} $(grad "$WT")${WEEK_PCT}% used${RST} ${MUT}${WEEK_RESET}${RST} "
+  USAGE_SEGMENT=" │ $(grad "$ST")${SESS_PCT}% used${RST} ${MUT}${SESS_RESET}${RST} ${MUT}·${RST} $(grad "$WT")${WEEK_PCT}% used${RST} ${MUT}${WEEK_RESET}${RST}"
 fi
 
 # ── Context bar (uses the shared gradient, keyed to block position) ──────────
@@ -247,7 +260,7 @@ if git rev-parse --git-dir &>/dev/null; then
 
   MODIFIED=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 
-  GIT_SEGMENT=" │  ${LAV}${ICON} ${REPO_NAME}${RST}  ${BRANCH}  ${SCY}⬆ ${AHEAD}${RST}  ${PNK}± ${MODIFIED}${RST}"
+  GIT_SEGMENT=" │ ${LAV}${ICON} ${REPO_NAME}${RST}  ${BRANCH}  ${SCY}⬆ ${AHEAD}${RST}  ${PNK}± ${MODIFIED}${RST}"
 fi
 
 # ── Effort display ────────────────────────────────────────────────────────────
@@ -295,7 +308,7 @@ case "${EFFORT:-}" in
 esac
 
 # ── Assemble and print ────────────────────────────────────────────────────────
-printf "  %s  %s  │  %s ${PCT}%% context%s%s%s\n" \
+printf "  %s  %s │ %s ${PCT}%% context%s%s%s\n" \
   "$MODEL" \
   "$EFFORT_DISPLAY" \
   "$BAR" \

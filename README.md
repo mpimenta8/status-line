@@ -7,12 +7,12 @@ A synthwave-styled status bar for [Claude Code](https://claude.ai/code) that sho
 ## What it shows
 
 ```
-  claude-opus-4-8  ◆ high  │  [████████████░░░░░░░░] 61% context  │  16% used 1h 57m · 22% used 4d 10h  │  ✦ my-repo  main  ⬆ 2  ± 4
+  Opus 4.8  ◆ high │ [████████████░░░░░░░░] 61% context │ 16% used 1h 57m · 22% used 4d 10h │ ✦ my-repo  main  ⬆ 2  ± 4
 ```
 
 | Segment | Description |
 |---|---|
-| Model name | Active Claude model |
+| Model name | Active Claude model, cleaned up from its raw ID (`claude-opus-4-8` → `Opus 4.8`) |
 | `◆ effort` | Current effort level (`low` / `medium` / `high` / `xhigh` / `max`) |
 | Context bar | Token usage vs. the model's real context window (200K, or 1M on Opus 4.8), gradient cyan → purple → hot pink; label reads `61% context` |
 | `X% used <reset>` (session) | Your **5-hour** usage window: percent used and time until it resets. Pulled from Claude Code's own usage data (`~/.claude.json`), the same numbers behind its native banner. |
