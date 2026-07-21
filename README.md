@@ -4,6 +4,8 @@ A synthwave-styled status bar for [Claude Code](https://claude.ai/code) that sho
 
 > Synthwave-styled status bar rendered at the bottom of Claude Code's terminal.
 
+![status-line preview](assets/preview.svg)
+
 ## What it shows
 
 ```
